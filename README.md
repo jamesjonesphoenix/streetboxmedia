@@ -1,2 +1,0 @@
-# streetboxmedia
-Website of streetboxmedia
