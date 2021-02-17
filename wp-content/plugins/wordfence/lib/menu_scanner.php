@@ -20,6 +20,7 @@ else if (wfConfig::get('touppPromptNeeded')) {
 	echo wfView::create('gdpr/banner')->render();
 }
 ?>
+<div id="wordfenceMode_scan"></div>
 <div class="wrap wordfence">
 	<div class="wf-container-fluid">
 		<div class="wf-row">
@@ -94,7 +95,7 @@ else if (wfConfig::get('touppPromptNeeded')) {
 											'percentage' => $scanner->reputationStatus(),
 											'activeColor' => (!$scanner->isEnabled() ? '#ececec' : null /* automatic */),
 											'title' => __('Reputation Checks', 'wordfence'),
-											'subtitle' => __('Check spam &amp; spamvertising blacklists', 'wordfence'),
+											'subtitle' => __('Check spam &amp; spamvertising blocklists', 'wordfence'),
 											'link' => $optionsURL . '#wf-scanner-options-general',
 											'linkLabel' => __('Manage Options', 'wordfence'),
 											'statusTitle' => __('Reputation Check Status', 'wordfence'),
@@ -250,11 +251,11 @@ echo wfView::create('scanner/issue-wfPluginRemoved')->render();
 echo wfView::create('scanner/issue-wfPluginAbandoned')->render();
 echo wfView::create('scanner/issue-wfPluginVulnerable')->render();
 echo wfView::create('scanner/issue-file')->render();
+echo wfView::create('scanner/issue-skippedPaths')->render();
 echo wfView::create('scanner/issue-knownfile')->render();
 echo wfView::create('scanner/issue-configReadable')->render();
 echo wfView::create('scanner/issue-publiclyAccessible')->render();
 echo wfView::create('scanner/issue-coreUnknown')->render();
-echo wfView::create('scanner/issue-dnsChange')->render();
 echo wfView::create('scanner/issue-diskSpace')->render();
 echo wfView::create('scanner/issue-wafStatus')->render();
 echo wfView::create('scanner/issue-geoipSupport')->render();

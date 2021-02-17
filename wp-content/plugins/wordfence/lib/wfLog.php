@@ -1,7 +1,7 @@
 <?php
-require_once('wfDB.php');
-require_once('wfUtils.php');
-require_once('wfBrowscap.php');
+require_once(dirname(__FILE__) . '/wfDB.php');
+require_once(dirname(__FILE__) . '/wfUtils.php');
+require_once(dirname(__FILE__) . '/wfBrowscap.php');
 class wfLog {
 	public $canLogHit = true;
 	private $effectiveUserID = 0;
@@ -214,19 +214,19 @@ class wfLog {
 		wfRateLimit::countHit($type, wfUtils::getIP());
 		
 		if (wfRateLimit::globalRateLimit()->shouldEnforce($type)) {
-			$this->takeBlockingAction('maxGlobalRequests', "Exceeded the maximum global requests per minute for crawlers or humans.");
+			$this->takeBlockingAction('maxGlobalRequests', __("Exceeded the maximum global requests per minute for crawlers or humans.", 'wordfence'));
 		}
 		else if (wfRateLimit::crawlerViewsRateLimit()->shouldEnforce($type)) {
-			$this->takeBlockingAction('maxRequestsCrawlers', "Exceeded the maximum number of requests per minute for crawlers."); //may not exit
+			$this->takeBlockingAction('maxRequestsCrawlers', __("Exceeded the maximum number of requests per minute for crawlers.", 'wordfence')); //may not exit
 		}
 		else if (wfRateLimit::crawler404sRateLimit()->shouldEnforce($type)) {
-			$this->takeBlockingAction('max404Crawlers', "Exceeded the maximum number of page not found errors per minute for a crawler.");
+			$this->takeBlockingAction('max404Crawlers', __("Exceeded the maximum number of page not found errors per minute for a crawler.", 'wordfence'));
 		}
 		else if (wfRateLimit::humanViewsRateLimit()->shouldEnforce($type)) {
-			$this->takeBlockingAction('maxRequestsHumans', "Exceeded the maximum number of page requests per minute for humans.");
+			$this->takeBlockingAction('maxRequestsHumans', __("Exceeded the maximum number of page requests per minute for humans.", 'wordfence'));
 		}
 		else if (wfRateLimit::human404sRateLimit()->shouldEnforce($type)) {
-			$this->takeBlockingAction('max404Humans', "Exceeded the maximum number of page not found errors per minute for humans.");
+			$this->takeBlockingAction('max404Humans', __("Exceeded the maximum number of page not found errors per minute for humans.", 'wordfence'));
 		}
 	}
 	
@@ -553,7 +553,7 @@ class wfLog {
 				$b->recordBlock();
 				wfActivityReport::logBlockedIP($IP, null, 'advanced');
 				$this->currentRequest->actionDescription = 'UA/Referrer/IP Range not allowed';
-				$this->do503(3600, "Advanced blocking in effect."); //exits
+				$this->do503(3600, __("Advanced blocking in effect.", 'wordfence')); //exits
 			}
 		}
 
@@ -632,26 +632,30 @@ class wfLog {
 				wfBlock::createRateBlock($reason, $IP, $secsToGo);
 				wfActivityReport::logBlockedIP($IP, null, 'throttle');
 				$this->tagRequestForBlock($reason);
-				
-				if (wfConfig::get('alertOn_block')) {
-					$message = sprintf(__('Wordfence has blocked IP address %s.', 'wordfence'), $IP) . "\n";
-					$message .= sprintf(__('The reason is: "%s".', 'wordfence'), $reason);
-					if ($secsToGo > 0) {
-						$message .= "\n" . sprintf(__('The duration of the block is %s.', 'wordfence'), wfUtils::makeDuration($secsToGo, true));
-					}
-					wordfence::alert(sprintf(__('Blocking IP %s', 'wordfence'), $IP), $message, $IP);
-				}
+
+				$alertCallback = array(new wfBlockAlert($IP, $reason, $secsToGo), 'send');
+
+				do_action('wordfence_security_event', 'block', array(
+					'ip' => $IP,
+					'reason' => $reason,
+					'duration' => $secsToGo,
+				), $alertCallback);
 				wordfence::status(2, 'info', sprintf(__('Blocking IP %s. %s', 'wordfence'), $IP, $reason));
 			}
 			else if ($action == 'throttle') { //Rate limited - throttle
 				$secsToGo = wfBlock::rateLimitThrottleDuration();
 				wfBlock::createRateThrottle($reason, $IP, $secsToGo);
 				wfActivityReport::logBlockedIP($IP, null, 'throttle');
-				
+
+				do_action('wordfence_security_event', 'throttle', array(
+					'ip' => $IP,
+					'reason' => $reason,
+					'duration' => $secsToGo,
+				));
 				wordfence::status(2, 'info', sprintf(__('Throttling IP %s. %s', 'wordfence'), $IP, $reason));
 				wfConfig::inc('totalIPsThrottled');
 			}
-			$this->do503($secsToGo, $reason);
+			$this->do503($secsToGo, $reason, false);
 		}
 		
 		return;
@@ -669,8 +673,17 @@ class wfLog {
 		return false;
 	}
 	
-	public function do503($secsToGo, $reason){
+	public function do503($secsToGo, $reason, $sendEventToCentral = true){
 		$this->initLogRequest();
+
+		if ($sendEventToCentral) {
+			do_action('wordfence_security_event', 'block', array(
+				'ip' => wfUtils::inet_ntop($this->currentRequest->IP),
+				'reason' => $this->currentRequest->actionDescription ? $this->currentRequest->actionDescription : $reason,
+				'duration' => $secsToGo,
+			));
+		}
+
 		$this->currentRequest->statusCode = 503;
 		if (!$this->currentRequest->action) {
 			$this->currentRequest->action = 'blocked:wordfence';
@@ -689,7 +702,7 @@ class wfLog {
 			header('Retry-After: ' . $secsToGo);
 		}
 		$customText = wpautop(wp_strip_all_tags(wfConfig::get('blockCustomText', '')));
-		require_once('wf503.php');
+		require_once(dirname(__FILE__) . '/wf503.php');
 		exit();
 	}
 	private function redirect($URL){
@@ -1043,12 +1056,14 @@ class wfUserIPRange {
  */
 class wfAdminUserMonitor {
 
+	protected $currentAdminList = array();
+
 	public function isEnabled() {
 		$options = wfScanner::shared()->scanOptions();
 		$enabled = $options['scansEnabled_suspiciousAdminUsers'];
 		if ($enabled && is_multisite()) {
 			if (!function_exists('wp_is_large_network')) {
-				require_once ABSPATH . WPINC . '/ms-functions.php';
+				require_once(ABSPATH . WPINC . '/ms-functions.php');
 			}
 			$enabled = !wp_is_large_network('sites') && !wp_is_large_network('users');
 		}
@@ -1060,7 +1075,11 @@ class wfAdminUserMonitor {
 	 */
 	public function createInitialList() {
 		$admins = $this->getCurrentAdmins();
-		wfConfig::set_ser('adminUserList', $admins);
+		$adminUserList = array();
+		foreach ($admins as $id => $user) {
+			$adminUserList[$id] = 1;
+		}
+		wfConfig::set_ser('adminUserList', $adminUserList);
 	}
 
 	/**
@@ -1122,53 +1141,57 @@ class wfAdminUserMonitor {
 	}
 
 	/**
+	 * @param bool $forceReload
 	 * @return array
 	 */
-	public function getCurrentAdmins() {
-		require_once ABSPATH . WPINC . '/user.php';
-		if (is_multisite()) {
-			if (function_exists("get_sites")) {
-				$sites = get_sites(array(
-					'network_id' => null,
+	public function getCurrentAdmins($forceReload = false) {
+		if (empty($this->currentAdminList) || $forceReload) {
+			require_once(ABSPATH . WPINC . '/user.php');
+			if (is_multisite()) {
+				if (function_exists("get_sites")) {
+					$sites = get_sites(array(
+						'network_id' => null,
+					));
+				}
+				else {
+					$sites = wp_get_sites(array(
+						'network_id' => null,
+					));
+				}
+			} else {
+				$sites = array(array(
+					'blog_id' => get_current_blog_id(),
 				));
 			}
-			else {
-				$sites = wp_get_sites(array(
-					'network_id' => null,
-				));
-			}
-		} else {
-			$sites = array(array(
-				'blog_id' => get_current_blog_id(),
-			));
-		}
 
-		// not very efficient, but the WordPress API doesn't provide a good way to do this.
-		$admins = array();
-		foreach ($sites as $siteRow) {
-			$siteRowArray = (array) $siteRow;
-			$user_query = new WP_User_Query(array(
-				'blog_id' => $siteRowArray['blog_id'],
-				'role'    => 'administrator',
-			));
-			$users = $user_query->get_results();
-			if (is_array($users)) {
-				/** @var WP_User $user */
-				foreach ($users as $user) {
-					$admins[$user->ID] = 1;
+			// not very efficient, but the WordPress API doesn't provide a good way to do this.
+			$this->currentAdminList = array();
+			foreach ($sites as $siteRow) {
+				$siteRowArray = (array) $siteRow;
+				$user_query = new WP_User_Query(array(
+					'blog_id' => $siteRowArray['blog_id'],
+					'role'    => 'administrator',
+				));
+				$users = $user_query->get_results();
+				if (is_array($users)) {
+					/** @var WP_User $user */
+					foreach ($users as $user) {
+						$this->currentAdminList[$user->ID] = $user;
+					}
+				}
+			}
+
+			// Add any super admins that aren't also admins on a network
+			$superAdmins = get_super_admins();
+			foreach ($superAdmins as $userLogin) {
+				$user = get_user_by('login', $userLogin);
+				if ($user) {
+					$this->currentAdminList[$user->ID] = $user;
 				}
 			}
 		}
 
-		// Add any super admins that aren't also admins on a network
-		$superAdmins = get_super_admins();
-		foreach ($superAdmins as $userLogin) {
-			$user = get_user_by('login', $userLogin);
-			if ($user) {
-				$admins[$user->ID] = 1;
-			}
-		}
-		return $admins;
+		return $this->currentAdminList;
 	}
 
 	public function getLoggedAdmins() {
@@ -1436,7 +1459,7 @@ class wfLiveTrafficQuery {
 	 * @return string
 	 * @throws wfLiveTrafficQueryException
 	 */
-	public function buildQuery(&$delayedHumanBotFiltering = null, &$humanOnly) {
+	public function buildQuery(&$delayedHumanBotFiltering, &$humanOnly) {
 		global $wpdb;
 		$filters = $this->getFilters();
 		$groupBy = $this->getGroupBy();
@@ -1981,7 +2004,7 @@ class wfErrorLogHandler {
 		static $processedFolders = array(); //Protection for endless loops caused by symlinks
 		if (is_file($path)) {
 			$file = basename($path);
-			if (preg_match('#(?:error_log(\-\d+)?$|\.log$)#i', $file)) {
+			if (preg_match('#(?:^php_errorlog$|error_log(\-\d+)?$|\.log$)#i', $file)) {
 				return array($path => is_readable($path));
 			}
 			return array();
@@ -2010,6 +2033,8 @@ class wfErrorLogHandler {
 	public static function outputErrorLog($path) {
 		$errorLogs = self::getErrorLogs();
 		if (!isset($errorLogs[$path])) { //Only allow error logs we've identified
+			global $wp_query;
+			$wp_query->set_404();
 			status_header(404);
 			nocache_headers();
 			

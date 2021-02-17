@@ -9,10 +9,26 @@ if (!defined('WFWAF_RUN_COMPLETE')) {
 if (!defined('WFWAF_AUTO_PREPEND')) {
 	define('WFWAF_AUTO_PREPEND', true);
 }
+if (!defined('WF_IS_WP_ENGINE')) {
+	define('WF_IS_WP_ENGINE', isset($_SERVER['IS_WPE']));
+}
+if (!defined('WF_IS_PRESSABLE')) {
+	define('WF_IS_PRESSABLE', (defined('IS_ATOMIC') && IS_ATOMIC) || (defined('IS_PRESSABLE') && IS_PRESSABLE));
+}
 
-require_once dirname(__FILE__) . '/wfWAFUserIPRange.php';
-require_once dirname(__FILE__) . '/wfWAFIPBlocksController.php';
-require_once dirname(__FILE__) . '/../vendor/wordfence/wf-waf/src/init.php';
+if (!defined('WF_PHP_UNSUPPORTED')) {
+	define('WF_PHP_UNSUPPORTED', version_compare(PHP_VERSION, '5.3', '<'));
+}
+
+if (WF_PHP_UNSUPPORTED) {
+	return;
+}
+
+
+
+require_once(dirname(__FILE__) . '/wfWAFUserIPRange.php');
+require_once(dirname(__FILE__) . '/wfWAFIPBlocksController.php');
+require_once(dirname(__FILE__) . '/../vendor/wordfence/wf-waf/src/init.php');
 
 class wfWAFWordPressRequest extends wfWAFRequest {
 	
@@ -35,11 +51,34 @@ class wfWAFWordPressRequest extends wfWAFRequest {
 		if (isset($theIP)) {
 			return $theIP;
 		}
+		$ips = array();
 		$howGet = wfWAF::getInstance()->getStorageEngine()->getConfig('howGetIPs', null, 'synced');
-		if (is_string($howGet) && is_array($_SERVER) && array_key_exists($howGet, $_SERVER)) {
-			$ips[] = array($_SERVER[$howGet], $howGet);
+		if ($howGet) {
+			if (is_string($howGet) && is_array($_SERVER) && array_key_exists($howGet, $_SERVER)) {
+				$ips[] = array($_SERVER[$howGet], $howGet);
+			}
+			
+			if ($howGet != 'REMOTE_ADDR') {
+				$ips[] = array((is_array($_SERVER) && array_key_exists('REMOTE_ADDR', $_SERVER)) ? $_SERVER['REMOTE_ADDR'] : '127.0.0.1', 'REMOTE_ADDR');
+			}
 		}
-		$ips[] = array((is_array($_SERVER) && array_key_exists('REMOTE_ADDR', $_SERVER)) ? $_SERVER['REMOTE_ADDR'] : '127.0.0.1', 'REMOTE_ADDR');
+		else {
+			$recommendedField = wfWAF::getInstance()->getStorageEngine()->getConfig('detectProxyRecommendation', null, 'synced');
+			if (!empty($recommendedField) && $recommendedField != 'UNKNOWN' && $recommendedField != 'DEFERRED') {
+				if (isset($_SERVER[$recommendedField])) {
+					$ips[] = array($_SERVER[$recommendedField], $recommendedField);
+				}
+			}
+			
+			$ips[] = array((is_array($_SERVER) && array_key_exists('REMOTE_ADDR', $_SERVER)) ? $_SERVER['REMOTE_ADDR'] : '127.0.0.1', 'REMOTE_ADDR');
+			if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+				$ips[] = array($_SERVER['HTTP_X_FORWARDED_FOR'], 'HTTP_X_FORWARDED_FOR');
+			}
+			if (isset($_SERVER['HTTP_X_REAL_IP'])) {
+				$ips[] = array($_SERVER['HTTP_X_REAL_IP'], 'HTTP_X_REAL_IP');
+			}
+		}
+		
 		$cleanedIP = $this->_getCleanIPAndServerVar($ips);
 		if (is_array($cleanedIP)) {
 			list($ip, $variable) = $cleanedIP;
@@ -193,7 +232,7 @@ class wfWAFWordPressObserver extends wfWAFBaseObserver {
 			}
 			$whitelistPattern = '/^(?:' . wfWAFUtils::substr($whitelistPattern, 0, -1) . ')$/i';
 
-			wfWAFRule::create(wfWAF::getInstance(), 0x8000000, 'rule', 'whitelist', 0, 'User Supplied Whitelisted URL', 'allow',
+			wfWAFRule::create(wfWAF::getInstance(), 0x8000000, 'rule', 'whitelist', 0, 'User Supplied Allowlisted URL', 'allow',
 				new wfWAFRuleComparisonGroup(
 					new wfWAFRuleComparison(wfWAF::getInstance(), 'match', $whitelistPattern, array(
 						'request.uri',
@@ -211,7 +250,7 @@ class wfWAFWordPressObserver extends wfWAFBaseObserver {
 			foreach ($whitelistedIPs as $whitelistedIP) {
 				$ipRange = new wfWAFUserIPRange($whitelistedIP);
 				if ($ipRange->isIPInRange(wfWAF::getInstance()->getRequest()->getIP())) {
-					throw new wfWAFAllowException('Wordfence whitelisted IP.');
+					throw new wfWAFAllowException('Wordfence allowlisted IP.');
 				}
 			}
 		}
@@ -444,29 +483,35 @@ class wfWAFWordPress extends wfWAF {
 			/** @var wfWAFCronEvent $event */
 			$cronDeduplication = array();
 			foreach ($cron as $index => $event) {
-				$event->setWaf($this);
-				if ($event->isInPast()) {
-					$run[$index] = $event;
-					$newEvent = $event->reschedule();
-					$className = get_class($newEvent);
-					if ($newEvent instanceof wfWAFCronEvent && $newEvent !== $event && !in_array($className, $cronDeduplication)) {
-						$cron[$index] = $newEvent;
-						$cronDeduplication[] = $className;
-						$updated = true;
-					} else {
-						unset($cron[$index]);
-						$updated = true;
-					}
-				}
-				else {
-					$className = get_class($event);
-					if (in_array($className, $cronDeduplication)) {
-						unset($cron[$index]);
-						$updated = true;
+				if (is_object($event) && $event instanceof wfWAFCronEvent) {
+					$event->setWaf($this);
+					if ($event->isInPast()) {
+						$run[$index] = $event;
+						$newEvent = $event->reschedule();
+						$className = get_class($newEvent);
+						if ($newEvent instanceof wfWAFCronEvent && $newEvent !== $event && !in_array($className, $cronDeduplication)) {
+							$cron[$index] = $newEvent;
+							$cronDeduplication[] = $className;
+							$updated = true;
+						} else {
+							unset($cron[$index]);
+							$updated = true;
+						}
 					}
 					else {
-						$cronDeduplication[] = $className;
+						$className = get_class($event);
+						if (in_array($className, $cronDeduplication)) {
+							unset($cron[$index]);
+							$updated = true;
+						}
+						else {
+							$cronDeduplication[] = $className;
+						}
 					}
+				}
+				else { //Remove bad/corrupt records
+					unset($cron[$index]);
+					$updated = true;
 				}
 			}
 		}
@@ -659,6 +704,94 @@ APACHE
 		);
 		@chmod(rtrim(WFWAF_LOG_PATH, '/') . '/.htaccess', (wfWAFWordPress::permissions() | 0444));
 	}
+
+	public function getGlobal($global) {
+		if (wfWAFUtils::strpos($global, '.') === false) {
+			return null;
+		}
+		list($prefix, $_global) = explode('.', $global);
+		switch ($prefix) {
+			case 'wordpress':
+				if ($_global === 'core') {
+					return $this->getStorageEngine()->getConfig('wordpressVersion', null, 'synced');
+				} else if ($_global === 'plugins') {
+					return $this->getStorageEngine()->getConfig('wordpressPluginVersions', null, 'synced');
+				} else if ($_global === 'themes') {
+					return $this->getStorageEngine()->getConfig('wordpressThemeVersions', null, 'synced');
+				}
+				break;
+		}
+		return parent::getGlobal($global);
+	}
+}
+
+class wfWAFWordPressStorageMySQL extends wfWAFStorageMySQL {
+
+	public function getSerializedParams() {
+		$params = parent::getSerializedParams();
+		$params[] = 'wordpressPluginVersions';
+		$params[] = 'wordpressThemeVersions';
+		return $params;
+	}
+
+	public function getAutoloadParams() {
+		$params = parent::getAutoloadParams();
+		$params['synced'][] = 'wordpressVersion';
+		$params['synced'][] = 'wordpressPluginVersions';
+		$params['synced'][] = 'wordpressThemeVersions';
+		return $params;
+	}
+}
+
+class wfWAFWordPressI18n implements wfWAFI18nEngine {
+
+	protected $translations;
+
+	/** @var wfWAFStorageInterface */
+	private $storageEngine;
+	/**
+	 * @var wfMO
+	 */
+	private $mo;
+
+	/**
+	 * @param wfWAFStorageInterface $storageEngine
+	 */
+	public function __construct($storageEngine) {
+		$this->storageEngine = $storageEngine;
+		$this->loadTranslations();
+	}
+
+	/**
+	 * @param string $text
+	 * @return string
+	 */
+	public function __($text) {
+		if ($this->mo) {
+			$translated = $this->mo->translate($text);
+			if ($translated) {
+				return $translated;
+			}
+		}
+
+		return $text;
+	}
+
+	protected function loadTranslations() {
+		require_once dirname(__FILE__) . '/pomo/mo.php';
+
+		$currentLocale = $this->storageEngine->getConfig('WPLANG', '', 'synced');
+
+		// Find translation file for the current language.
+		$mofile = dirname(__FILE__) . '/../languages/wordfence-' . $currentLocale . '.mo';
+		if (!file_exists($mofile)) {
+			// No translation, use the default
+			$mofile = dirname(__FILE__) . '/../languages/wordfence.mo';
+		}
+
+		$this->mo = new wfMO();
+		return $this->mo->import_from_file( $mofile );
+	}
 }
 
 if (!defined('WFWAF_LOG_PATH')) {
@@ -673,34 +806,97 @@ if (!is_dir(WFWAF_LOG_PATH)) {
 	wfWAFWordPress::writeHtaccess();
 }
 
-wfWAF::setSharedStorageEngine(new wfWAFStorageFile(WFWAF_LOG_PATH . 'attack-data.php', WFWAF_LOG_PATH . 'ips.php', WFWAF_LOG_PATH . 'config.php', WFWAF_LOG_PATH . 'wafRules.rules'));
-wfWAF::setInstance(new wfWAFWordPress(
-	wfWAFWordPressRequest::createFromGlobals(),
-	wfWAF::getSharedStorageEngine()
-));
-wfWAF::getInstance()->getEventBus()->attach(new wfWAFWordPressObserver);
 
 try {
-	$rulesFiles = array(
-		WFWAF_LOG_PATH . 'rules.php',
-		// WFWAF_PATH . 'rules.php',
-	);
-	foreach ($rulesFiles as $rulesFile) {
-		if (!file_exists($rulesFile) && !wfWAF::getInstance()->isReadOnly()) {
-			@touch($rulesFile);
-		}
-		@chmod($rulesFile, (wfWAFWordPress::permissions() | 0444));
-		if (is_writable($rulesFile)) {
-			wfWAF::getInstance()->setCompiledRulesFile($rulesFile);
-			break;
+
+	if (!defined('WFWAF_STORAGE_ENGINE') && WF_IS_WP_ENGINE) {
+		define('WFWAF_STORAGE_ENGINE', 'mysqli');
+	}
+
+	if (defined('WFWAF_STORAGE_ENGINE')) {
+		switch (WFWAF_STORAGE_ENGINE) {
+			case 'mysqli':
+				// Find the wp-config.php
+				if (is_dir(dirname(WFWAF_LOG_PATH))) {
+					if (file_exists(dirname(WFWAF_LOG_PATH) . '/../wp-config.php')) {
+						$wfWAFDBCredentials = wfWAFUtils::extractCredentialsWPConfig(dirname(WFWAF_LOG_PATH) . '/../wp-config.php');
+					} else if (file_exists(dirname(WFWAF_LOG_PATH) . '/../../wp-config.php')) {
+						$wfWAFDBCredentials = wfWAFUtils::extractCredentialsWPConfig(dirname(WFWAF_LOG_PATH) . '/../../wp-config.php');
+					}
+				} else if (!empty($_SERVER['DOCUMENT_ROOT'])) {
+					if (file_exists($_SERVER['DOCUMENT_ROOT'] . '/wp-config.php')) {
+						$wfWAFDBCredentials = wfWAFUtils::extractCredentialsWPConfig($_SERVER['DOCUMENT_ROOT'] . '/wp-config.php');
+					} else if (file_exists($_SERVER['DOCUMENT_ROOT'] . '/../wp-config.php')) {
+						$wfWAFDBCredentials = wfWAFUtils::extractCredentialsWPConfig($_SERVER['DOCUMENT_ROOT'] . '/../wp-config.php');
+					}
+				}
+
+				if (!empty($wfWAFDBCredentials)) {
+					$wfWAFStorageEngine = new wfWAFWordPressStorageMySQL(new wfWAFStorageEngineMySQLi(), $wfWAFDBCredentials['tablePrefix']);
+					$wfWAFStorageEngine->getDb()->connect(
+						$wfWAFDBCredentials['user'],
+						$wfWAFDBCredentials['pass'],
+						$wfWAFDBCredentials['database'],
+						!empty($wfWAFDBCredentials['ipv6']) ? '[' . $wfWAFDBCredentials['host'] . ']' : $wfWAFDBCredentials['host'],
+						!empty($wfWAFDBCredentials['port']) ? $wfWAFDBCredentials['port'] : null,
+						!empty($wfWAFDBCredentials['socket']) ? $wfWAFDBCredentials['socket'] : null
+					);
+					if (array_key_exists('charset', $wfWAFDBCredentials)) {
+						$wfWAFStorageEngine->getDb()
+							->setCharset($wfWAFDBCredentials['charset'],
+								!empty($wfWAFDBCredentials['collation']) ? $wfWAFDBCredentials['collation'] : '');
+					}
+					if (function_exists('get_option')) {
+						$wfWAFStorageEngine->installing = !get_option('wordfenceActivated');
+						$wfWAFStorageEngine->getDb()->installing = $wfWAFStorageEngine->installing;
+					}
+
+				} else {
+					unset($wfWAFDBCredentials);
+				}
+
+				break;
 		}
 	}
-		
+
+	if (empty($wfWAFStorageEngine)) {
+		$wfWAFStorageEngine = new wfWAFStorageFile(
+			WFWAF_LOG_PATH . 'attack-data.php',
+			WFWAF_LOG_PATH . 'ips.php',
+			WFWAF_LOG_PATH . 'config.php',
+			WFWAF_LOG_PATH . 'rules.php',
+			WFWAF_LOG_PATH . 'wafRules.rules'
+		);
+	}
+
+	wfWAF::setSharedStorageEngine($wfWAFStorageEngine);
+	wfWAF::setInstance(new wfWAFWordPress(wfWAFWordPressRequest::createFromGlobals(), wfWAF::getSharedStorageEngine()));
+	wfWAF::getInstance()->getEventBus()->attach(new wfWAFWordPressObserver);
+
+	if ($wfWAFStorageEngine instanceof wfWAFStorageFile) {
+		$rulesFiles = array(
+			WFWAF_LOG_PATH . 'rules.php',
+			// WFWAF_PATH . 'rules.php',
+		);
+		foreach ($rulesFiles as $rulesFile) {
+			if (!file_exists($rulesFile) && !wfWAF::getInstance()->isReadOnly()) {
+				@touch($rulesFile);
+			}
+			@chmod($rulesFile, (wfWAFWordPress::permissions() | 0444));
+			if (is_writable($rulesFile)) {
+				wfWAF::getInstance()->setCompiledRulesFile($rulesFile);
+				break;
+			}
+		}
+	} else if ($wfWAFStorageEngine instanceof wfWAFStorageMySQL) {
+		$wfWAFStorageEngine->runMigrations();
+		$wfWAFStorageEngine->setDefaults();
+	}
+
 	if (!wfWAF::getInstance()->isReadOnly()) {
-		if (!file_exists(wfWAF::getInstance()->getCompiledRulesFile()) || !filesize(wfWAF::getInstance()->getCompiledRulesFile())) {
+		if (wfWAF::getInstance()->getStorageEngine()->needsInitialRules()) {
 			try {
-				if (is_writable(wfWAF::getInstance()->getCompiledRulesFile()) &&
-					wfWAF::getInstance()->getStorageEngine()->getConfig('apiKey', null, 'synced') !== null &&
+				if (wfWAF::getInstance()->getStorageEngine()->getConfig('apiKey', null, 'synced') !== null &&
 					wfWAF::getInstance()->getStorageEngine()->getConfig('createInitialRulesDelay', null, 'transient') < time()
 				) {
 					$event = new wfWAFCronFetchRulesEvent(time() - 60);
@@ -728,6 +924,8 @@ try {
 		}
 	}
 
+	wfWAFI18n::setInstance(new wfWAFI18n(new wfWAFWordPressI18n($wfWAFStorageEngine)));
+
 	try {
 		wfWAF::getInstance()->run();
 	} catch (wfWAFBuildRulesException $e) {
@@ -739,6 +937,10 @@ try {
 	}
 
 } catch (wfWAFStorageFileConfigException $e) {
+	// Let this request through for now
+	error_log($e->getMessage());
+
+} catch (wfWAFStorageEngineMySQLiException $e) {
 	// Let this request through for now
 	error_log($e->getMessage());
 

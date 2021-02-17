@@ -39,8 +39,9 @@ if (!isset($sendingDiagnosticEmail)) {
 					</div>
 					<div id="sendByEmailDiv" class="wf-add-bottom">
 						<span class="wf-nowrap">
-							<input class="wf-btn wf-btn-primary" type="submit" id="sendByEmail" value="Send Report by Email"/>
-							<input class="wf-btn wf-btn-default" type="button" id="expandAllDiagnostics" value="Expand All Diagnostics"/>
+							<input class="wf-btn wf-btn-primary wf-btn-sm" type="submit" id="exportDiagnostics" value="Export"/>
+							<input class="wf-btn wf-btn-primary wf-btn-sm" type="submit" id="sendByEmail" value="Send Report by Email"/>
+							<input class="wf-btn wf-btn-default wf-btn-sm" type="button" id="expandAllDiagnostics" value="Expand All Diagnostics"/>
 						</span>
 					</div>
 				</div>
@@ -94,7 +95,7 @@ if (!isset($sendingDiagnosticEmail)) {
 				<table>
 					<thead>
 					<tr>
-						<th colspan="<?php echo $cols ?>"><?php echo esc_html($title) ?></th>
+						<th colspan="2"><?php echo esc_html($title) ?></th>
 					</tr>
 					</thead>
 					<tbody>
@@ -103,13 +104,12 @@ if (!isset($sendingDiagnosticEmail)) {
 						$infoOnly = isset($result['infoOnly']) && $result['infoOnly'];
 						?>
 						<tr>
-							<td style="width: 75%; min-width: 300px"
-									colspan="<?php echo $cols - 1 ?>"><?php echo wp_kses($result['label'], array(
+							<td style="width: 75%; min-width: 300px"><?php echo (is_array($result['label']) && isset($result['label']['raw']) && $result['label']['raw'] ? $result['label']['value'] : wp_kses($result['label'], array(
 									'code'   => array(),
 									'strong' => array(),
 									'em'     => array(),
 									'a'      => array('href' => true),
-								)) ?></td>
+								))) ?></td>
 							<td>
 								<?php if ($infoOnly): ?>
 									<div class="wf-result-info"><?php echo nl2br(esc_html($result['message'])); ?></div>
@@ -147,13 +147,12 @@ if (!isset($sendingDiagnosticEmail)) {
 								$infoOnly = isset($result['infoOnly']) && $result['infoOnly'];
 								?>
 								<li>
-									<div style="width: 75%; min-width: 300px;"
-											colspan="<?php echo $cols - 1 ?>"><?php echo wp_kses($result['label'], array(
+									<div style="width: 75%; min-width: 300px;"><?php echo (is_array($result['label']) && isset($result['label']['raw']) && $result['label']['raw'] ? $result['label']['value'] : wp_kses($result['label'], array(
 											'code'   => array(),
 											'strong' => array(),
 											'em'     => array(),
 											'a'      => array('href' => true),
-										)) ?></div>
+										))) ?></div>
 									<div class="wf-right">
 									<?php if ($infoOnly): ?>
 										<div class="wf-result-info"><?php echo nl2br(esc_html($result['message'])); ?></div>
@@ -309,7 +308,7 @@ if (!isset($sendingDiagnosticEmail)) {
 						'IMAGE_EDIT_OVERWRITE'         => array('description' => __('Overwrite image edits when restoring the original', 'wordfence'), 'value' => (defined('IMAGE_EDIT_OVERWRITE') && IMAGE_EDIT_OVERWRITE ? __('Yes', 'wordfence') : __('No', 'wordfence'))),
 						'FORCE_SSL_ADMIN'              => array('description' => __('Force SSL for administrative logins', 'wordfence'), 'value' => (defined('FORCE_SSL_ADMIN') && FORCE_SSL_ADMIN ? __('Yes', 'wordfence') : __('No', 'wordfence'))),
 						'WP_HTTP_BLOCK_EXTERNAL'       => array('description' => __('Block external URL requests', 'wordfence'), 'value' => (defined('WP_HTTP_BLOCK_EXTERNAL') && WP_HTTP_BLOCK_EXTERNAL ? __('Yes', 'wordfence') : __('No', 'wordfence'))),
-						'WP_ACCESSIBLE_HOSTS'          => __('Whitelisted hosts', 'wordfence'),
+						'WP_ACCESSIBLE_HOSTS'          => __('Allowlisted hosts', 'wordfence'),
 						'WP_AUTO_UPDATE_CORE'          => array('description' => __('Automatic WP Core updates', 'wordfence'), 'value' => defined('WP_AUTO_UPDATE_CORE') ? (is_bool(WP_AUTO_UPDATE_CORE) ? (WP_AUTO_UPDATE_CORE ? __('Everything', 'wordfence') : __('None', 'wordfence')) : WP_AUTO_UPDATE_CORE) : __('Default', 'wordfence')),
 						'WP_PROXY_HOST'                => array('description' => __('Hostname for a proxy server', 'wordfence'), 'value' => defined('WP_PROXY_HOST') ? WP_PROXY_HOST : __('(not set)', 'wordfence')),
 						'WP_PROXY_PORT'                => array('description' => __('Port for a proxy server', 'wordfence'), 'value' => defined('WP_PROXY_PORT') ? WP_PROXY_PORT : __('(not set)', 'wordfence')),
@@ -321,6 +320,7 @@ if (!isset($sendingDiagnosticEmail)) {
 						'DOMAIN_CURRENT_SITE'		   => __('Defines the multisite domain for the current site', 'wordfence'),
 						'PATH_CURRENT_SITE'			   => __('Defines the multisite path for the current site', 'wordfence'),
 						'BLOG_ID_CURRENT_SITE'		   => __('Defines the multisite database ID for the current site', 'wordfence'),
+						'WP_DISABLE_FATAL_ERROR_HANDLER' => array('description' => __('Disable the fatal error handler', 'wordfence'), 'value' => (defined('WP_DISABLE_FATAL_ERROR_HANDLER') && WP_DISABLE_FATAL_ERROR_HANDLER ? __('Yes', 'wordfence') : __('No', 'wordfence'))),
 					);
 
 					foreach ($wordPressValues as $settingName => $settingData):
@@ -376,7 +376,7 @@ if (!isset($sendingDiagnosticEmail)) {
 						}
 						?>
 						<tr>
-							<td colspan="<?php echo $cols - 1 ?>">
+							<td>
 								<strong><?php echo esc_html($pluginData['Name']); ?> (<?php echo esc_html($slug); ?>)</strong>
 								<?php if (!empty($pluginData['Version'])): ?>
 									- <?php printf(__('Version %s', 'wordfence'), esc_html($pluginData['Version'])); ?>
@@ -422,7 +422,7 @@ if (!isset($sendingDiagnosticEmail)) {
 							}
 							?>
 							<tr>
-								<td colspan="<?php echo $cols - 1 ?>">
+								<td>
 									<strong><?php echo esc_html($pluginData['Name']) ?> (<?php echo esc_html($slug); ?>)</strong>
 									<?php if (!empty($pluginData['Version'])): ?>
 										- <?php printf(__('Version %s', 'wordfence'), esc_html($pluginData['Version'])); ?>
@@ -435,7 +435,7 @@ if (!isset($sendingDiagnosticEmail)) {
 					<?php else: ?>
 						<tbody>
 						<tr>
-							<td colspan="<?php echo $cols ?>"><?php _e('No MU-Plugins', 'wordfence'); ?></td>
+							<td><?php _e('No MU-Plugins', 'wordfence'); ?></td>
 						</tr>
 						</tbody>
 
@@ -461,12 +461,14 @@ if (!isset($sendingDiagnosticEmail)) {
 					<?php
 					//Taken from plugin.php and modified to always show multisite drop-ins
 					$dropins = array(
-						'advanced-cache.php' => array( __( 'Advanced caching plugin'       ), 'WP_CACHE' ), // WP_CACHE
-						'db.php'             => array( __( 'Custom database class'         ), true ), // auto on load
-						'db-error.php'       => array( __( 'Custom database error message' ), true ), // auto on error
-						'install.php'        => array( __( 'Custom installation script'    ), true ), // auto on installation
-						'maintenance.php'    => array( __( 'Custom maintenance message'    ), true ), // auto on maintenance
-						'object-cache.php'   => array( __( 'External object cache'         ), true ), // auto on load
+						'advanced-cache.php'	 => array( __( 'Advanced caching plugin'       ), 'WP_CACHE' ), // WP_CACHE
+						'db.php'            	 => array( __( 'Custom database class'         ), true ), // auto on load
+						'db-error.php'      	 => array( __( 'Custom database error message' ), true ), // auto on error
+						'install.php'       	 => array( __( 'Custom installation script'    ), true ), // auto on installation
+						'maintenance.php'   	 => array( __( 'Custom maintenance message'    ), true ), // auto on maintenance
+						'object-cache.php'  	 => array( __( 'External object cache'         ), true ), // auto on load
+						'php-error.php'          => array( __( 'Custom PHP error message'	   ), true ), // auto on error
+						'fatal-error-handler.php'=> array( __( 'Custom PHP fatal error handler' ), true ), // auto on error
 					);
 					$dropins['sunrise.php'       ] = array( __( 'Executed before Multisite is loaded' ), is_multisite() && 'SUNRISE' ); // SUNRISE
 					$dropins['blog-deleted.php'  ] = array( __( 'Custom site deleted message'   ), is_multisite() ); // auto on deleted blog
@@ -478,7 +480,7 @@ if (!isset($sendingDiagnosticEmail)) {
 						$active = file_exists(WP_CONTENT_DIR . DIRECTORY_SEPARATOR . $file) && is_readable(WP_CONTENT_DIR . DIRECTORY_SEPARATOR . $file) && $data[1];
 						?>
 						<tr>
-							<td colspan="<?php echo $cols - 1 ?>">
+							<td>
 								<strong><?php echo esc_html($data[0]) ?> (<?php echo esc_html($file); ?>)</strong>
 							</td>
 							<?php if ($active): ?>
@@ -519,7 +521,7 @@ if (!isset($sendingDiagnosticEmail)) {
 							}
 							?>
 							<tr>
-								<td colspan="<?php echo $cols - 1 ?>">
+								<td>
 									<strong><?php echo esc_html($themeData['Name']) ?> (<?php echo esc_html($slug); ?>)</strong>
 									<?php if (!empty($themeData['Version'])): ?>
 										- <?php printf(__('Version %s', 'wordfence'), esc_html($themeData['Version'])); ?>
@@ -535,7 +537,7 @@ if (!isset($sendingDiagnosticEmail)) {
 					<?php else: ?>
 						<tbody>
 						<tr>
-							<td colspan="<?php echo $cols ?>"><?php _e('No Themes', 'wordfence'); ?></td>
+							<td><?php _e('No Themes', 'wordfence'); ?></td>
 						</tr>
 						</tbody>
 
@@ -565,9 +567,10 @@ if (!isset($sendingDiagnosticEmail)) {
 						if (is_array($values)) {
 							foreach ($values as $cron_job => $v) {
 								if (is_numeric($timestamp)) {
+									$overdue = ((time() - 1800) > $timestamp);
 									?>
-									<tr>
-										<td colspan="<?php echo $cols - 1 ?>"><?php echo esc_html(date('r', $timestamp)) ?></td>
+									<tr<?php echo $overdue ? ' class="wf-overdue-cron"' : ''; ?>>
+										<td><?php echo esc_html(date('r', $timestamp)) . ($overdue ? ' <strong>(' . __('Overdue', 'wordfence') . ')</strong>' : '') ?></td>
 										<td><?php echo esc_html($cron_job) ?></td>
 									</tr>
 									<?php
@@ -610,7 +613,7 @@ if (!isset($sendingDiagnosticEmail)) {
 				<div class="wf-block-content wf-clearfix wf-padding-no-left wf-padding-no-right">
 					<ul class="wf-block-list wf-padding-add-left-large wf-padding-add-right-large">
 						<li style="border-bottom: 1px solid #e2e2e2;">
-							<div style="width: 75%; min-width: 300px;" colspan="<?php echo $cols - 1 ?>"><?php _e('Wordfence Table Check', 'wordfence'); ?></div>
+							<div style="width: 75%; min-width: 300px;"><?php _e('Wordfence Table Check', 'wordfence'); ?></div>
 							<div class="wf-right">
 								<?php if ($total > 250): ?>
 									<div class="wf-result-info"><?php _e('Unable to verify - table count too high', 'wordfence'); ?></div>
@@ -628,7 +631,19 @@ if (!isset($sendingDiagnosticEmail)) {
 											$missingTables[] = $t;
 										}
 									}
-									
+
+									foreach (
+										array(
+											\WordfenceLS\Controller_DB::TABLE_2FA_SECRETS,
+											\WordfenceLS\Controller_DB::TABLE_SETTINGS,
+										) as $t) {
+										$table = \WordfenceLS\Controller_DB::network_table($t);
+										if (!in_array($table, $existingTables)) {
+											$hasAll = false;
+											$missingTables[] = $t;
+										}
+									}
+
 									if ($hasAll): ?>
 									<div class="wf-result-success"><?php _e('All Tables Exist', 'wordfence'); ?></div>
 									<?php else: ?>
@@ -839,6 +854,12 @@ if (!isset($sendingDiagnosticEmail)) {
 								<?php _e('Send a test activity report email:', 'wordfence'); ?> <a href="<?php echo wfSupportController::esc_supportURL(wfSupportController::ITEM_DIAGNOSTICS_TEST_ACTIVITY_REPORT); ?>" target="_blank" rel="noopener noreferrer" class="wfhelp wf-inline-help"></a>
 								<input type="email" id="email_summary_email_address_debug" value="" size="20" maxlength="255" class="wfConfigElem"/>
 								<input class="wf-btn wf-btn-default wf-btn-sm" type="button" value="<?php esc_attr_e('Send Test Activity Report', 'wordfence'); ?>" onclick="WFAD.ajax('wordfence_email_summary_email_address_debug', {email: jQuery('#email_summary_email_address_debug').val()});"/>
+							</span>
+						</li>
+						<li>
+							<span>
+								<?php _e('Clear all Wordfence Central connection data', 'wordfence'); ?> <a href="<?php echo wfSupportController::esc_supportURL(wfSupportController::ITEM_DIAGNOSTICS_REMOVE_CENTRAL_DATA); ?>" target="_blank" rel="noopener noreferrer" class="wfhelp wf-inline-help"></a>
+								<input class="wf-btn wf-btn-default wf-btn-sm" type="button" value="<?php esc_attr_e('Clear Connection Data', 'wordfence'); ?>" onclick="WFAD.ajax('wordfence_wfcentral_disconnect', {}, function() { WFAD.colorboxModal((self.isSmallScreen ? '300px' : '400px'), 'Successfully romved data', 'All associated Wordfence Central data has been removed from the database.'); });"/>
 							</span>
 						</li>
 					</ul>

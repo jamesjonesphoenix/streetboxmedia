@@ -372,14 +372,15 @@ SQL
 		}
 		return false;
 	}
-	
+
 	/**
 	 * Returns list of firewall activity up to $limit number of entries.
-	 * 
+	 *
 	 * @param int $limit Max events to return in results
+	 * @param int $remainder
 	 * @return array
 	 */
-	public function getRecentFirewallActivity($limit = 300, &$remainder) {
+	public function getRecentFirewallActivity($limit, &$remainder) {
 		$dateRange = wfActivityReport::getReportDateRange();
 		$recent_firewall_activity = new wfRecentFirewallActivity(null, max(604800, $dateRange[1] - $dateRange[0]));
 		$recent_firewall_activity->run();
@@ -461,7 +462,7 @@ SQL
 	public function getCountryNameByCode($code) {
 		static $wfBulkCountries;
 		if (!isset($wfBulkCountries)) {
-			include 'wfBulkCountries.php';
+			include(dirname(__FILE__) . '/wfBulkCountries.php');
 		}
 		return array_key_exists($code, $wfBulkCountries) ? $wfBulkCountries[$code] : "";
 	}
@@ -580,7 +581,7 @@ SQL
 				}
 				
 				if (isset($actionData['failedRules']) && $actionData['failedRules'] == 'blocked') {
-					$row->longDescription = "Blocked because the IP is blacklisted";
+					$row->longDescription = "Blocked because the IP is blocklisted";
 				}
 				else {
 					$row->longDescription = "Blocked for " . $row->actionDescription;
@@ -589,7 +590,7 @@ SQL
 				$paramKey = base64_decode($actionData['paramKey']);
 				$paramValue = base64_decode($actionData['paramValue']);
 				if (strlen($paramValue) > 100) {
-					$paramValue = substr($paramValue, 0, 100) . chr(2026);
+					$paramValue = substr($paramValue, 0, 100) . '...';
 				}
 				
 				if (preg_match('/([a-z0-9_]+\.[a-z0-9_]+)(?:\[(.+?)\](.*))?/i', $paramKey, $matches)) {

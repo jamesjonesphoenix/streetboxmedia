@@ -47,7 +47,6 @@ class wfCentralAPIRequest {
 		if (empty($args['headers'])) {
 			$args['headers'] = array();
 		}
-		$args['cookies']['XDEBUG_SESSION'] = 'XDEBUG_ECLIPSE';
 
 		$token = $this->getToken();
 		if ($token) {
@@ -60,6 +59,24 @@ class wfCentralAPIRequest {
 
 		$http = _wp_http_get_object();
 		$response = $http->request(WORDFENCE_CENTRAL_API_URL_SEC . $this->getEndpoint(), $args);
+
+		if (!is_wp_error($response)) {
+			$body = wp_remote_retrieve_body($response);
+			$statusCode = wp_remote_retrieve_response_code($response);
+
+			// Check if site has been disconnected on Central's end, but the plugin is still trying to connect.
+			if ($statusCode === 404 && strpos($body, 'Site has been disconnected') !== false) {
+				// Increment attempt count.
+				$centralDisconnectCount = get_site_transient('wordfenceCentralDisconnectCount');
+				set_site_transient('wordfenceCentralDisconnectCount', ++$centralDisconnectCount, 86400);
+
+				// Once threshold is hit, disconnect Central.
+				if ($centralDisconnectCount > 3) {
+					wfRESTConfigController::disconnectConfig();
+				}
+			}
+		}
+
 		return new wfCentralAPIResponse($response);
 	}
 
@@ -253,7 +270,7 @@ class wfCentralAuthenticatedAPIRequest extends wfCentralAPIRequest {
 	}
 
 	public function fetchToken() {
-		require_once WORDFENCE_PATH . '/vendor/paragonie/sodium_compat/autoload-fast.php';
+		require_once(WORDFENCE_PATH . '/crypto/vendor/paragonie/sodium_compat/autoload-fast.php');
 
 		$defaultArgs = array(
 			'timeout' => 6,
@@ -313,21 +330,29 @@ class wfCentral {
 	 * @return bool
 	 */
 	public static function isSupported() {
-		return function_exists('register_rest_route');
+		return function_exists('register_rest_route') && version_compare(phpversion(), '5.3', '>=');
 	}
 
 	/**
 	 * @return bool
 	 */
 	public static function isConnected() {
-		return self::isSupported() && ((bool) wfConfig::get('wordfenceCentralConnected', false));
+		return self::isSupported() && ((bool) self::_isConnected());
 	}
 
 	/**
 	 * @return bool
 	 */
 	public static function isPartialConnection() {
-		return !wfConfig::get('wordfenceCentralConnected') && wfConfig::get('wordfenceCentralSiteID');
+		return !self::_isConnected() && wfConfig::get('wordfenceCentralSiteID');
+	}
+
+	public static function _isConnected($forceUpdate = false) {
+		static $isConnected;
+		if (!isset($isConnected) || $forceUpdate) {
+			$isConnected = wfConfig::get('wordfenceCentralConnected', false);
+		}
+		return $isConnected;
 	}
 
 	/**
@@ -447,7 +472,7 @@ class wfCentral {
 	}
 
 	public static function requestConfigurationSync() {
-		if (! wfCentral::isConnected()) {
+		if (! wfCentral::isConnected() || !self::$syncConfig) {
 			return;
 		}
 
@@ -460,6 +485,12 @@ class wfCentral {
 		} catch (Exception $e) {
 			// We can safely ignore an error here for now.
 		}
+	}
+
+	protected static $syncConfig = true;
+
+	public static function preventConfigurationSync() {
+		self::$syncConfig = false;
 	}
 
 	/**
@@ -494,5 +525,60 @@ class wfCentral {
 			error_log($e);
 		}
 		return false;
+	}
+
+	/**
+	 * @param string $event
+	 * @param array $data
+	 * @param callable|null $alertCallback
+	 */
+	public static function sendSecurityEvent($event, $data = array(), $alertCallback = null) {
+		$alerted = false;
+		if (!self::pluginAlertingDisabled() && is_callable($alertCallback)) {
+			call_user_func($alertCallback);
+			$alerted = true;
+		}
+
+		$siteID = wfConfig::get('wordfenceCentralSiteID');
+		$request = new wfCentralAuthenticatedAPIRequest('/site/' . $siteID . '/security-events', 'POST', array(
+			'data' => array(
+				array(
+					'type'       => 'security-event',
+					'attributes' => array(
+						'type'       => $event,
+						'data'       => $data,
+						'event_time' => microtime(true),
+					),
+				),
+			),
+		));
+		try {
+			// Attempt to send the security event to Central.
+			$response = $request->execute();
+		} catch (wfCentralAPIException $e) {
+			// If we didn't alert previously, notify the user now in the event Central is down.
+			if (!$alerted && is_callable($alertCallback)) {
+				call_user_func($alertCallback);
+			}
+		}
+	}
+
+	/**
+	 * @param $event
+	 * @param array $data
+	 * @param callable|null $alertCallback
+	 */
+	public static function sendAlertCallback($event, $data = array(), $alertCallback = null) {
+		if (is_callable($alertCallback)) {
+			call_user_func($alertCallback);
+		}
+	}
+
+	public static function pluginAlertingDisabled() {
+		if (!self::isConnected()) {
+			return false;
+		}
+
+		return wfConfig::get('wordfenceCentralPluginAlertingDisabled', false);
 	}
 }
